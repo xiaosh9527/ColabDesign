@@ -29,6 +29,10 @@ class mk_mpnn_model():
       from .weights import __file__ as mpnn_path
     elif weights == "soluble":
       from .weights_soluble import __file__ as mpnn_path
+    elif weights == "abmpnn":
+      from .weights_abmpnn import __file__ as mpnn_path
+    elif weights == "antigen":
+      from .weights_antigen import __file__ as mpnn_path
     else:
       raise ValueError(f'Invalid value {weights} supplied for weights. Value must be either "original" or "soluble".')
 

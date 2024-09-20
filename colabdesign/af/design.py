@@ -115,7 +115,8 @@ class _af_design:
     for k in ["hard","soft","temp"]: self.aux["log"][k] = self.opt[k]
 
     # compute sequence recovery
-    if self.protocol in ["fixbb","partial"] or (self.protocol == "binder" and self._args["redesign"]):
+    # if self.protocol in ["fixbb","partial"] or (self.protocol == "binder" and self._args["redesign"]):
+    if self.protocol in ["fixbb","partial","binder"]:
       if self.protocol == "partial":
         aatype = self.aux["aatype"][...,self.opt["pos"]]
       else:

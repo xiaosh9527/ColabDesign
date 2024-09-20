@@ -185,7 +185,7 @@ class _af_prep:
                    rm_binder_seq=True,
                    rm_binder_sc=True,
                    rm_template_ic=False,
-                                      
+                   
                    hotspot=None, ignore_missing=True, **kwargs):
     '''
     prep inputs for binder design
