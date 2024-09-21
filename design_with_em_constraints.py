@@ -1,10 +1,6 @@
 import os, re, sys, string, argparse, jax, subprocess, tempfile, Bio, shutil, mrcfile
 sys.path.insert(0, '/work/lpdi/users/shxiao/ColabDesign/')
 
-from utils.design import *
-# from utils.align import *
-from utils.io import *
-
 import numpy as np
 import pandas as pd
 import jax.numpy as jnp
@@ -411,8 +407,8 @@ def predict(
     if 'biasing_mask' in kwargs:
         biasing_mask = kwargs['biasing_mask']
         all_mask = biasing_mask | interface_mask
-
-    print(f'Masking {len(np.where(all_mask)[0])} residues on binder for prediction...')
+        print(f'Masking {len(np.where(all_mask)[0])} residues on binder for prediction...')
+        
     af_model._inputs['batch']['all_atom_mask'][-af_model._binder_len:][all_mask, :] = np.zeros_like(af_model._inputs['batch']['all_atom_mask'][-af_model._binder_len:][all_mask, :])
     
     models = af_model._model_names[:num_models]
