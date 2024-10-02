@@ -38,23 +38,32 @@ class _af_loss:
     mask = inputs["seq_mask"]
     zeros = jnp.zeros_like(mask)
     tL,bL = self._target_len, self._binder_len
-    binder_id = zeros.at[-bL:].set(mask[-bL:])
+    # binder_id = zeros.at[-bL:].set(mask[-bL:])
+    if "binder_hotspot" in opt:
+      binder_id = zeros.at[opt["binder_hotspot"]].set(mask[opt["binder_hotspot"]])      
+    else:
+      binder_id = zeros.at[-bL:].set(mask[-bL:])
+
+    full_binder_id = zeros.at[-bL:].set(mask[-bL:])
+
     if "hotspot" in opt:
       target_id = zeros.at[opt["hotspot"]].set(mask[opt["hotspot"]])
-      i_con_loss = get_con_loss(inputs, outputs, opt["i_con"], mask_1d=target_id, mask_1b=binder_id)
+      mask_2d = binder_id[:,None] * target_id[None,:]
+      i_con_loss = get_con_loss(inputs, outputs, opt["i_con"], mask_1d=binder_id, mask_1b=target_id, mask_2d=mask_2d)
     else:
       target_id = zeros.at[:tL].set(mask[:tL])
-      i_con_loss = get_con_loss(inputs, outputs, opt["i_con"], mask_1d=binder_id, mask_1b=target_id)
+      mask_2d = binder_id[:,None] * target_id[None,:]
+      i_con_loss = get_con_loss(inputs, outputs, opt["i_con"], mask_1d=binder_id, mask_1b=target_id, mask_2d=mask_2d)
 
     # unsupervised losses
     aux["losses"].update({
-      "plddt":   get_plddt_loss(outputs, mask_1d=binder_id), # plddt over binder
-      "exp_res": get_exp_res_loss(outputs, mask_1d=binder_id),
-      "pae":     get_pae_loss(outputs, mask_1d=binder_id), # pae over binder + interface
-      "con":     get_con_loss(inputs, outputs, opt["con"], mask_1d=binder_id, mask_1b=binder_id),
+      "plddt":   get_plddt_loss(outputs, mask_1d=full_binder_id), # plddt over binder
+      "exp_res": get_exp_res_loss(outputs, mask_1d=full_binder_id),
+      "pae":     get_pae_loss(outputs, mask_1d=full_binder_id), # pae over binder + interface
+      "con":     get_con_loss(inputs, outputs, opt["con"], mask_1d=full_binder_id, mask_1b=full_binder_id),
       # interface
       "i_con":   i_con_loss,
-      "i_pae":   get_pae_loss(outputs, mask_1d=binder_id, mask_1b=target_id),
+      "i_pae":   get_pae_loss(outputs, mask_1d=binder_id, mask_1b=target_id, mask_2d=mask_2d),
     })
 
     # supervised losses

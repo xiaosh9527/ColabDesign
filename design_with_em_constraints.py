@@ -41,8 +41,9 @@ PDB_CHAIN_IDS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
 def create_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=str)
-    parser.add_argument('--em_map_path', type=str)
-    parser.add_argument('--density_cutoff', type=float, default=0.010)
+    parser.add_argument('--num_diffusion_designs', type=int, default=20)
+    # parser.add_argument('--em_map_path', type=str)
+    # parser.add_argument('--density_cutoff', type=float, default=0.010)
     parser.add_argument('--num_afdesign_designs', type=int, default=10)
     parser.add_argument('--num_mpnn_designs', type=int, default=10)
     parser.add_argument('--learning_rate', type=float, default=2e-2)
@@ -62,8 +63,50 @@ def create_parser():
     parser.add_argument('--use_mpnn_loss', action='store_true', help='Whether to use MPNN loss')
     parser.add_argument('--mpnn_weights', type=str, default='abmpnn, soluble, original')
     parser.add_argument('--mpnn_model_name', type=str, default='abmpnn; v_48_002; v_48_010; v_48_020; v_48_030')
-    
+    parser.add_argument('--rfdiffusion_executable',type=str, help='Path to RFdiffusion\'s executable.', default='/work/lpdi/users/shxiao/RFdiffusion/run_inference.py')
+
     return parser
+
+def diffuse(
+    input_pdb_path,
+    output_pdb_path_prefix,
+    contigmap: str = 'H27-124/17-17/H142-155/0 L25-131',
+    seed: int = 0,
+    num_designs: int = 10,
+    executable: str = '/work/lpdi/users/shxiao/RFdiffusion/run_inference.py',
+):
+    "Create loop variability using RFdiffusion"
+    
+    if not os.path.isfile(executable):
+        print("RFdiffusion executable not existent!")
+        sys.exit(1)
+    
+    cmd = [
+        "python",
+        executable,
+        f"inference.seed={seed}",
+        f"inference.num_designs={num_designs}",
+        f"inference.input_pdb={input_pdb_path}",           
+        f"inference.output_prefix={output_pdb_path_prefix}",
+        f"contigmap.contigs=[{contigmap}]",
+    ]
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+
+    # NOTE: need to align diffused models to the original structure
+    for i in range(num_designs):
+        cmd = [
+            "/work/lpdi/users/shxiao/USalign", 
+            f"{output_pdb_path_prefix}_{i}.pdb", 
+            f"{input_pdb_path}", 
+            '-mm', '1', '-ter', '0',
+            '-o', f"{output_pdb_path_prefix}_{i}_aln",
+        ]
+        
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+        
+    print(f'Diffusion done for {num_designs} designs.')
 
 def process_ab(
     input_path: str, 
@@ -222,6 +265,19 @@ def add_mpnn_loss(self, model_name='abmpnn', weights='abmpnn', mpnn=0.2, mpnn_se
     self.opt["weights"]["mpnn"] = mpnn
     self.opt["weights"]["mpnn_seq"] = mpnn_seq
 
+def add_dist_loss(self, binder_chain, target_chain, map_path, weight: float = 1.0, density_cutoff: float = 0.2):
+    binder_em_coords, target_em_coords = partition_empem_density(self, binder_chain, target_chain, map_path, density_cutoff)
+    def loss_fn(inputs, outputs, aux, key):
+        atom_coords = outputs["structure_module"]["final_atom_positions"]
+        binder_chain_id = np.in1d(self._pdb['idx']['chain'], binder_chain.split(','))
+        binder_coords = atom_coords[binder_chain_id][:, residue_constants.atom_order["CA"]].reshape(-1,3)
+        d_m = jnp.sqrt(jnp.sum((binder_coords[:, None, :] - binder_em_coords[None, :, :])**2, axis=-1))
+
+        return {"dist": d_m.min(-1).mean()}
+    
+    self._callbacks["model"]["loss"].append(loss_fn)
+    self.opt["weights"]["dist"] = weight
+
 def design(
     input_args: dict,
     design_name: str,
@@ -230,7 +286,7 @@ def design(
     rm_aa: str,               # NOTE: to prevent given AA types in all positions
     biasing_aa: str,          # NOTE: to bias against given AA types in the selected positions
     biasing_mask,             # NOTE: selected positions for biasing against
-    pssm_steps: int = 120,
+    pssm_steps: int = 100,
     semi_greedy_steps: int = 24,
     seed: int = 0, 
     lr: float = 2e-2, 
@@ -249,7 +305,7 @@ def design(
     )
     af_model.prep_inputs(**input_args, ignore_missing=False)
     
-    add_dist_loss(af_model, input_args['binder_chain'], input_args['target_chain'], input_args['map_path'], 0.1, input_args['density_cutoff'])
+    # add_dist_loss(af_model, input_args['binder_chain'], input_args['target_chain'], input_args['map_path'], 0.1, input_args['density_cutoff'])  # NOTE: This is where to add the loss to EM density
 
     if args.use_mpnn_loss: add_mpnn_loss(af_model, weights=args.mpnn_weights, model_name=args.mpnn_model_name, mpnn=0.1, mpnn_seq=0.0, seed=seed)
 
@@ -274,7 +330,7 @@ def design(
         af_model.opt["fix_pos"] = np.array(sub_fix_pos)
         af_model._wt_aatype_sub = af_model._pdb["batch"]["aatype"][sub_i]
     
-    af_model.opt["weights"].update({"dgram_cce":0.1, "plddt":0.0, "rmsd":0.2, "con":0.0, "i_con":1.0, "i_pae":0.0})
+    af_model.opt["weights"].update({"dgram_cce":0.1, "plddt":0.0, "rmsd":0.0, "con":0.0, "i_con":1.0, "i_pae":0.0})
     print("weights", af_model.opt["weights"])
     print(f'\nNow designing {design_name}...\n[Random seed {seed}]: Designing binder sequence using PSSM-semigreedy optimization...')
     af_model.restart(seq=binder_starting_seq, rm_aa=rm_aa, seed=seed, reset_opt=False)
@@ -384,7 +440,7 @@ def predict(
         rm_target=False,
         rm_target_seq=False,
         rm_target_sc=False,
-        rm_binder=True,
+        rm_binder=False,
         rm_binder_seq=True,
         rm_binder_sc=True,
         rm_template_ic=True
@@ -407,8 +463,8 @@ def predict(
     if 'biasing_mask' in kwargs:
         biasing_mask = kwargs['biasing_mask']
         all_mask = biasing_mask | interface_mask
-        print(f'Masking {len(np.where(all_mask)[0])} residues on binder for prediction...')
-        
+
+    print(f'Masking {len(np.where(all_mask)[0])} residues on binder for prediction...')
     af_model._inputs['batch']['all_atom_mask'][-af_model._binder_len:][all_mask, :] = np.zeros_like(af_model._inputs['batch']['all_atom_mask'][-af_model._binder_len:][all_mask, :])
     
     models = af_model._model_names[:num_models]
@@ -472,19 +528,6 @@ def read_mrc(mrcfilename):
         xyz = xyz.T
         
         return xyz, emd.data.flatten(order='F').reshape(nx, ny, nz)
-
-def add_dist_loss(self, binder_chain, target_chain, map_path, weight: float = 1.0, density_cutoff: float = 0.2):
-    binder_em_coords, target_em_coords = partition_empem_density(self, binder_chain, target_chain, map_path, density_cutoff)
-    def loss_fn(inputs, outputs, aux, key):
-        atom_coords = outputs["structure_module"]["final_atom_positions"]
-        binder_chain_id = np.in1d(self._pdb['idx']['chain'], binder_chain.split(','))
-        binder_coords = atom_coords[binder_chain_id][:, residue_constants.atom_order["CA"]].reshape(-1,3)
-        d_m = jnp.sqrt(jnp.sum((binder_coords[:, None, :] - binder_em_coords[None, :, :])**2, axis=-1))
-
-        return {"dist": d_m.min(-1).mean()}
-    
-    self._callbacks["model"]["loss"].append(loss_fn)
-    self.opt["weights"]["dist"] = weight
 
 def rank_array(input_array):
     # numpy.argsort returns the indices that would sort an array.
@@ -597,24 +640,29 @@ def main(args) -> None:
     output_dir = f"./outputs/{complex_name}/job_{seed}"
     os.makedirs(output_dir, exist_ok=True)
     
-    print(f'\nUsing original binder {args.binder_pdb}...\n')
-    os.makedirs(output_dir+'/00.original_outputs', exist_ok=True)
-    binder_pdb_prefix = output_dir+'/00.original_outputs/'+os.path.basename(args.binder_pdb).split('.pdb')[0]+'_'+str(seed)
-    shutil.copy(args.binder_pdb, binder_pdb_prefix+'_000.pdb')
-    iter_num = 1
+    if args.num_diffusion_designs > 0:
+        print(f'Generating {args.num_diffusion_designs} diffusion models...\n')
+        binder_pdb_prefix = output_dir+'/00.diff_outputs/'+os.path.basename(args.binder_pdb).split('.pdb')[0]+'_'+str(seed)
+        diffuse(args.binder_pdb, binder_pdb_prefix, CDR3len='15-20', seed=seed, num_designs=args.num_diffusion_designs, executable=args.rfdiffusion_executable) 
+        iter_num = args.num_diffusion_designs  
+    else:
+        print(f'\nUsing original binder {args.binder_pdb} without diffusion...\n')
+        os.makedirs(output_dir+'/00.original_outputs', exist_ok=True)
+        binder_pdb_prefix = output_dir+'/00.original_outputs/'+os.path.basename(args.binder_pdb).split('.pdb')[0]+'_'+str(seed)
+        shutil.copy(args.binder_pdb, binder_pdb_prefix+'_0.pdb')
+        iter_num = 1
 
     rng = np.random.default_rng(seed)
     seed_list = rng.integers(0, 2**32, args.num_afdesign_designs)
     result = {}
     for n in range(iter_num):
-        binder_pdb = f'{binder_pdb_prefix}_{str(n).zfill(3)}.pdb'
-        
+        binder_pdb = f'{binder_pdb_prefix}_{n}_aln.pdb'
         ''' Combine binder & target PDBs'''
         os.makedirs(os.path.join(output_dir, '01.combined_complex'), exist_ok=True)
         output_pdb_path = os.path.join(output_dir, '01.combined_complex', f'{complex_name}_{n}.pdb')
         output = combine_pdbs(
             args.target_pdb, args.target_chain,
-            binder_pdb, binder_chain, 
+            binder_pdb, 'A,B', # NOTE: Diffusion will change chain H & L to A & B
             '/tmp/tmp.pdb',
             output_pdb_path,
             seed=seed,
@@ -647,8 +695,8 @@ def main(args) -> None:
             
         x = {
             "pdb_filename": output_pdb_path,
-            "map_path": args.em_map_path,
-            "density_cutoff": args.density_cutoff,
+            # "map_path": args.em_map_path,
+            # "density_cutoff": args.density_cutoff,
             "target_chain": output['target_chain'],
             "binder_chain": output['binder_chain'],
             "hotspot":target_hotspot,
@@ -725,6 +773,7 @@ def main(args) -> None:
                 
                 predict_score_dict = {
                     "iface_resid": ','.join(interface_region_residues),
+                    "iface_hydropathy": np.mean([kd[x] for x in np.array(list(output['binder_starting_seq'].replace('/','')))[interface_mask]]),
                     "plddt_predict": aux['plddt'].mean(1)[best_idx],
                     "i_ptm_predict": aux['i_ptm'][best_idx],
                     "i_pae_predict": aux['losses']['i_pae'][best_idx],

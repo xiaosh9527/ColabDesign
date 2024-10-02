@@ -229,6 +229,10 @@ class _af_prep:
     if hotspot is not None:
       self.opt["hotspot"] = prep_pos(hotspot, **self._pdb["idx"])["pos"]
 
+    if "binder_hotspot" in kwargs:
+      binder_hotspot = kwargs.pop("binder_hotspot")
+      self.opt["binder_hotspot"] = prep_pos(binder_hotspot, **self._pdb["idx"])["pos"]
+
     if redesign:
       # binder redesign
       self._wt_aatype = self._pdb["batch"]["aatype"][self._target_len:]
