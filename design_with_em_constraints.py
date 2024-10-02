@@ -42,6 +42,7 @@ def create_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=str)
     parser.add_argument('--num_diffusion_designs', type=int, default=20)
+    parser.add_argument('--contigmap', type=str, default='H27-124/17-17/H142-155/0 L25-131', help='ContigMap for RFdiffusion')
     # parser.add_argument('--em_map_path', type=str)
     # parser.add_argument('--density_cutoff', type=float, default=0.010)
     parser.add_argument('--num_afdesign_designs', type=int, default=10)
@@ -643,7 +644,7 @@ def main(args) -> None:
     if args.num_diffusion_designs > 0:
         print(f'Generating {args.num_diffusion_designs} diffusion models...\n')
         binder_pdb_prefix = output_dir+'/00.diff_outputs/'+os.path.basename(args.binder_pdb).split('.pdb')[0]+'_'+str(seed)
-        diffuse(args.binder_pdb, binder_pdb_prefix, CDR3len='15-20', seed=seed, num_designs=args.num_diffusion_designs, executable=args.rfdiffusion_executable) 
+        diffuse(args.binder_pdb, binder_pdb_prefix, args.contigmap, seed=seed, num_designs=args.num_diffusion_designs, executable=args.rfdiffusion_executable) 
         iter_num = args.num_diffusion_designs  
     else:
         print(f'\nUsing original binder {args.binder_pdb} without diffusion...\n')
