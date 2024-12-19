@@ -186,7 +186,9 @@ class _af_prep:
                    rm_binder_sc=True,
                    rm_template_ic=False,
                    
-                   hotspot=None, ignore_missing=True, **kwargs):
+                   hotspot=None, 
+                   coldspot=None,
+                   ignore_missing=True, **kwargs):
     '''
     prep inputs for binder design
     ---------------------------------------------------
@@ -229,9 +231,8 @@ class _af_prep:
     if hotspot is not None:
       self.opt["hotspot"] = prep_pos(hotspot, **self._pdb["idx"])["pos"]
 
-    if "binder_hotspot" in kwargs:
-      binder_hotspot = kwargs.pop("binder_hotspot")
-      self.opt["binder_hotspot"] = prep_pos(binder_hotspot, **self._pdb["idx"])["pos"]
+    if coldspot is not None:
+      self.opt["coldspot"] = prep_pos(hotspot, **self._pdb["idx"])["pos"]
 
     if redesign:
       # binder redesign
